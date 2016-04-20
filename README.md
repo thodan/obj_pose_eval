@@ -1,2 +1,3 @@
-# obj_pose_eval
-Utilities for evaluation of 6D object pose estimation.
+# Utilities for evaluation of 6D object pose estimation
+
+Coming soon...
