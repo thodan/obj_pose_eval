@@ -1,6 +1,7 @@
 ### Tools for Evaluation of 6D Object Pose Estimation
 
-The tools are implemented in Python 2.7 and require the following libraries: NumPy, SciPy, VisPy, PyOpenGL, PyGlet. Samples additionally require: Matplotlib, OpenCV.
+The tools are implemented in Python 2.7 and require the following libraries: NumPy, SciPy, VisPy, PyOpenGL, PyGlet.
+Samples additionally require: Matplotlib, OpenCV.
 
 Samples:
 - samples/**eval_rotating_cup.py**: An example on how to use the pose error functions.
