@@ -311,6 +311,7 @@ def render_model(model, im_size, K, R, t, clip_near=100, clip_far=2000,
     c = _Canvas(vertices, model['faces'], im_size, K, R, t, clip_near, clip_far,
                 bg_color, ambient_weight, render_rgb, render_depth)
     app.run()
+    c.close()
 
     #---------------------------------------------------------------------------
     if mode == 'rgb':
