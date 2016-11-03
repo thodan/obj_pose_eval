@@ -8,4 +8,4 @@ The tools are implemented in Python 2.7 and require libraries SciPy (0.18.1) and
 - samples/**render_demo.py**: Renders color/depth image of a 3D mesh model.
 - samples/**show_visibility_dresden.py**: Estimates visibility masks in images from the ICCV2015 Occluded Object Dataset - http://cvlab-dresden.de/iccv2015-occlusion-challenge.
 
-**Author:** Tomas Hodan (hodantom@cmp.felk.cvut.cz, http://www.hodan.xyz), Center for Machine Perception, Czech Technical University in Prague
+Author: **Tomas Hodan** (hodantom@cmp.felk.cvut.cz, http://www.hodan.xyz), Center for Machine Perception, Czech Technical University in Prague
