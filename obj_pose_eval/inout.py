@@ -4,13 +4,29 @@
 import numpy as np
 import struct
 
+def load_poses(path):
+    with open(path, 'r') as f:
+        lines = f.read().splitlines()
+        poses = []
+        for line in lines:
+            if not line.isspace():
+                elems = line.split(' ')
+                im_id = int(elems[0])
+                obj_id = int(elems[1])
+                R = np.array(map(float, elems[2:11])).reshape((3, 3))
+                t = np.array(map(float, elems[11:14])).reshape((3, 1))
+                pose = {'im_id': im_id, 'obj_id': obj_id, 'R': R, 't': t}
+                if len(elems) > 14:
+                    pose['score'] = float(elems[14])
+                poses.append(pose)
+    return poses
 
-def read_gt_pose_OcclusionChallengeICCV2015(pose_fpath):
+def load_gt_pose_dresden(path):
     R = []
     t = []
     rotation_sec = False
     center_sec = False
-    with open(pose_fpath, 'r') as f:
+    with open(path, 'r') as f:
         for line in f.read().splitlines():
             if 'rotation:' in line:
                 rotation_sec = True
@@ -40,10 +56,9 @@ def read_gt_pose_OcclusionChallengeICCV2015(pose_fpath):
         pose['t'] = yz_flip.dot(pose['t'])
     return pose
 
-
-def read_ply(path):
+def load_ply(path):
     """
-    Loads 3D mesh model from a PLY file.
+    Loads a 3D mesh model from a PLY file.
 
     :param path: A path to a PLY file.
     :return: The loaded model given by a dictionary with items:
@@ -176,3 +191,55 @@ def read_ply(path):
     f.close()
 
     return model
+
+def save_ply(path, pts, pts_colors=np.array([]), faces=np.array([])):
+    """
+    Saves a 3D mesh model to a PLY file.
+
+    :param path: A path to the resulting PLY file.
+    :param pts: nx3 ndarray
+    :param pts_colors: nx3 ndarray
+    :param faces: mx3 ndarray
+    """
+    pts_colors = np.array(pts_colors)
+    if pts_colors.size != 0:
+        assert(len(pts) == len(pts_colors))
+
+    valid_pts_count = 0
+    for pt_id, pt in enumerate(pts):
+        if not np.isnan(np.sum(pt)):
+            valid_pts_count += 1
+
+    f = open(path, 'w')
+    f.write(
+        'ply\n'
+        'format ascii 1.0\n'
+        #'format binary_little_endian 1.0\n'
+        'element vertex ' + str(valid_pts_count) + '\n'
+        'property float x\n'
+        'property float y\n'
+        'property float z\n'
+    )
+    if pts_colors.size != 0:
+        f.write(
+            'property uchar red\n'
+            'property uchar green\n'
+            'property uchar blue\n'
+        )
+    if faces.size != 0:
+        f.write(
+            'element face ' + str(len(faces)) + '\n'
+            'property list uchar int vertex_indices\n'
+        )
+    f.write('end_header\n')
+
+    for pt_id, pt in enumerate(pts):
+        if not np.isnan(np.sum(pt)):
+            f.write(' '.join(map(str, pt.squeeze().tolist())) + ' ')
+            if pts_colors.size != 0:
+                f.write(' '.join(map(str, map(int, list(pts_colors[pt_id])))))
+            f.write('\n')
+    for face in faces:
+        f.write(' '.join(map(str, map(int, [len(face)] + list(face.squeeze())))) + ' ')
+        f.write('\n')
+    f.close()

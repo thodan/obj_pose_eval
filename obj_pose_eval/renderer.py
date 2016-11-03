@@ -1,14 +1,19 @@
 # Author: Tomas Hodan (hodantom@cmp.felk.cvut.cz)
 # Center for Machine Perception, Czech Technical University in Prague
 
+# A script to render rgb/depth image of a 3D mesh model.
+
 import numpy as np
-from vispy import app, gloo
-import OpenGL.GL as gl
+from glumpy import app, gloo, gl
 
+# Set backend (http://glumpy.readthedocs.io/en/latest/api/app-backends.html)
+# app.use('pyglet')
+# app.use('freeglut')
 
-# WARNING: doesn't work with Qt4 (update() does not call on_draw()??)
-app.use_app('PyGlet') # Set backend
-
+# Set logging level
+from glumpy.log import log
+import logging
+log.setLevel(logging.WARNING) # ERROR, WARNING, DEBUG, INFO
 
 # Color vertex shader
 #-------------------------------------------------------------------------------
@@ -18,9 +23,9 @@ uniform mat4 u_mvp;
 uniform vec3 u_light_eye_pos;
 
 attribute vec3 a_position;
-attribute vec4 a_color;
+attribute vec3 a_color;
 
-varying vec4 v_color;
+varying vec3 v_color;
 varying vec3 v_eye_pos;
 varying vec3 v_L;
 
@@ -32,13 +37,12 @@ void main() {
 }
 """
 
-
 # Color fragment shader
 #-------------------------------------------------------------------------------
 _color_fragment_code = """
 uniform float u_light_ambient_w;
 
-varying vec4 v_color;
+varying vec3 v_color;
 varying vec3 v_eye_pos;
 varying vec3 v_L;
 
@@ -49,10 +53,9 @@ void main() {
     float light_diffuse_w = max(dot(normalize(v_L), normalize(face_normal)), 0.0);
     float light_w = u_light_ambient_w + light_diffuse_w;
     if(light_w > 1.0) light_w = 1.0;
-    gl_FragColor = light_w * v_color;
+    gl_FragColor = vec4(light_w * v_color, 1.0);
 }
 """
-
 
 # Depth vertex shader
 # Ref: https://github.com/julienr/vertex_visibility/blob/master/depth.py
@@ -66,14 +69,13 @@ void main() {
 #
 # Once the vertex is in view space (view * model * v), its depth is simply the
 # Z axis. So instead of reading from the depth buffer and undoing the projection
-# matrix, we store the Z coord of each vertex in the COLOR buffer and then
-# read from the color buffer. OpenGL desktop allows for float32 color buffer
-# components.
+# matrix, we store the Z coord of each vertex in the color buffer. OpenGL allows
+# for float32 color buffer components.
 _depth_vertex_code = """
 uniform mat4 u_mv;
 uniform mat4 u_mvp;
 attribute vec3 a_position;
-attribute vec4 a_color;
+attribute vec3 a_color;
 varying float v_eye_depth;
 
 void main() {
@@ -85,17 +87,15 @@ void main() {
 }
 """
 
-
 # Depth fragment shader
 #-------------------------------------------------------------------------------
 _depth_fragment_code = """
 varying float v_eye_depth;
 
 void main() {
-    gl_FragColor = vec4(v_eye_depth, 0.0, 0.1, 1.0);
+    gl_FragColor = vec4(v_eye_depth, 0.0, 0.0, 1.0);
 }
 """
-
 
 # Functions to calculate transformation matrices
 # Note that OpenGL expects the matrices to be saved column-wise
@@ -105,16 +105,13 @@ void main() {
 def _compute_model_view(model, view):
     return np.dot(model, view)
 
-
 # Model-view-projection matrix
 def _compute_model_view_proj(model, view, proj):
     return np.dot(np.dot(model, view), proj)
 
-
 # Normal matrix (Ref: http://www.songho.ca/opengl/gl_normaltransform.html)
 def _compute_normal_matrix(model, view):
     return np.linalg.inv(np.dot(model, view)).T
-
 
 # Conversion of Hartley-Zisserman intrinsic matrix to OpenGL projection matrix
 #-------------------------------------------------------------------------------
@@ -158,130 +155,84 @@ def _compute_calib_proj(K, x0, y0, w, h, nc, fc, window_coords='y_down'):
         ]) # This row is also standard glPerspective
     return proj.T
 
+#-------------------------------------------------------------------------------
+def draw_color(shape, vertex_buffer, index_buffer, mat_model, mat_view, mat_proj,
+               ambient_weight, bg_color):
+
+    program = gloo.Program(_color_vertex_code, _color_fragment_code)
+    program.bind(vertex_buffer)
+    program['u_light_eye_pos'] = [0, 0, 0]
+    program['u_light_ambient_w'] = ambient_weight
+    program['u_mv'] = _compute_model_view(mat_model, mat_view)
+    # program['u_nm'] = compute_normal_matrix(model, view)
+    program['u_mvp'] = _compute_model_view_proj(mat_model, mat_view, mat_proj)
+
+    # Frame buffer object
+    color_buf = np.zeros((shape[0], shape[1], 4), np.float32).view(gloo.TextureFloat2D)
+    depth_buf = np.zeros((shape[0], shape[1]), np.float32).view(gloo.DepthTexture)
+    fbo = gloo.FrameBuffer(color=color_buf, depth=depth_buf)
+    fbo.activate()
+
+    # OpenGL setup
+    gl.glEnable(gl.GL_DEPTH_TEST)
+    gl.glEnable(gl.GL_CULL_FACE)
+    gl.glCullFace(gl.GL_BACK) # Back-facing polygons will be culled
+    gl.glClearColor(bg_color[0], bg_color[1], bg_color[2], bg_color[3])
+    gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+    gl.glViewport(0, 0, shape[1], shape[0])
+
+    # Rendering
+    program.draw(gl.GL_TRIANGLES, index_buffer)
+
+    # Retrieve the contents of the FBO texture
+    rgb = np.zeros((shape[0], shape[1], 4), dtype=np.float32)
+    gl.glReadPixels(0, 0, shape[1], shape[0], gl.GL_RGBA, gl.GL_FLOAT, rgb)
+    rgb.shape = shape[0], shape[1], 4
+    rgb = rgb[::-1, :]
+    rgb = np.round(rgb[:, :, :3] * 255).astype(np.uint8) # Convert to [0, 255]
+
+    fbo.deactivate()
+
+    return rgb
+
+def draw_depth(shape, vertex_buffer, index_buffer, mat_model, mat_view, mat_proj):
+
+    program = gloo.Program(_depth_vertex_code, _depth_fragment_code)
+    program.bind(vertex_buffer)
+    program['u_mv'] = _compute_model_view(mat_model, mat_view)
+    program['u_mvp'] = _compute_model_view_proj(mat_model, mat_view, mat_proj)
+
+    # Frame buffer object
+    color_buf = np.zeros((shape[0], shape[1], 4), np.float32).view(gloo.TextureFloat2D)
+    depth_buf = np.zeros((shape[0], shape[1]), np.float32).view(gloo.DepthTexture)
+    fbo = gloo.FrameBuffer(color=color_buf, depth=depth_buf)
+    fbo.activate()
+
+    gl.glEnable(gl.GL_DEPTH_TEST)
+    gl.glEnable(gl.GL_CULL_FACE)
+    gl.glCullFace(gl.GL_BACK) # Back-facing polygons will be culled
+    gl.glClearColor(0.0, 0.0, 0.0, 0.0)
+    gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+    gl.glViewport(0, 0, shape[1], shape[0])
+
+    # Rendering
+    program.draw(gl.GL_TRIANGLES, index_buffer)
+
+    # Retrieve the contents of the FBO texture
+    depth = np.zeros((shape[0], shape[1], 4), dtype=np.float32)
+    gl.glReadPixels(0, 0, shape[1], shape[0], gl.GL_RGBA, gl.GL_FLOAT, depth)
+    depth.shape = shape[0], shape[1], 4
+    depth = depth[::-1, :]
+    depth = depth[:, :, 0] # Depth is saved in the first channel
+
+    fbo.deactivate()
+
+    return depth
 
 #-------------------------------------------------------------------------------
-class _Canvas(app.Canvas):
-    def __init__(self, vertices, faces, size, K, R, t, clip_near, clip_far,
-                 bg_color=(0.0, 0.0, 0.0, 0.0), ambient_weight=0.1,
-                 render_rgb=True, render_depth=True):
-        """
-        mode is from ['rgb', 'depth', 'rgb+depth']
-        """
-        app.Canvas.__init__(self, show=False, size=size)
-
-        #gloo.gl.use_gl('gl2 debug')
-
-        self.size = size
-        self.shape = (self.size[1], self.size[0])
-        self.bg_color = bg_color
-        self.ambient_weight = ambient_weight
-        self.render_rgb = render_rgb
-        self.render_depth = render_depth
-
-        self.rgb = np.array([])
-        self.depth = np.array([])
-
-        # Model matrix
-        self.mat_model = np.eye(4, dtype=np.float32) # From object space to world space
-
-        # View matrix (transforming also the coordinate system from OpenCV to
-        # OpenGL camera space)
-        self.mat_view = np.eye(4, dtype=np.float32) # From world space to eye space
-        self.mat_view[:3, :3], self.mat_view[:3, 3] = R, t.squeeze()
-        yz_flip = np.eye(4, dtype=np.float32)
-        yz_flip[1, 1], yz_flip[2, 2] = -1, -1
-        self.mat_view = yz_flip.dot(self.mat_view) # OpenCV to OpenGL camera system
-        self.mat_view = self.mat_view.T # OpenGL expects column-wise matrix format
-
-        # Projection matrix
-        self.mat_proj = _compute_calib_proj(K, 0, 0, size[0], size[1], clip_near, clip_far)
-
-        # Create buffers
-        self.vertex_buffer = gloo.VertexBuffer(vertices)
-        self.index_buffer = gloo.IndexBuffer(faces.flatten().astype(np.uint32))
-
-        # We manually draw the hidden canvas
-        self.update()
-
-    def on_draw(self, event):
-        if self.render_rgb:
-            self.draw_color() # Render color image
-        if self.render_depth:
-            self.draw_depth() # Render depth image
-        app.quit() # Immediately exit the application after the first drawing
-
-    def draw_color(self):
-        program = gloo.Program(_color_vertex_code, _color_fragment_code)
-        program.bind(self.vertex_buffer)
-        program['u_light_eye_pos'] = [0, 0, 0]
-        program['u_light_ambient_w'] = self.ambient_weight
-        program['u_mv'] = _compute_model_view(self.mat_model, self.mat_view)
-        # program['u_nm'] = compute_normal_matrix(self.model, self.view)
-        program['u_mvp'] = _compute_model_view_proj(self.mat_model, self.mat_view, self.mat_proj)
-
-        # Texture where we render the scene
-        render_tex = gloo.Texture2D(shape=self.shape + (4,))
-
-        # Frame buffer object
-        fbo = gloo.FrameBuffer(render_tex, gloo.RenderBuffer(self.shape))
-        with fbo:
-            gloo.set_state(depth_test=True)
-            gloo.set_state(cull_face=True)
-            gloo.set_cull_face('back')  # Back-facing polygons will be culled
-            gloo.set_clear_color(self.bg_color)
-            gloo.clear(color=True, depth=True)
-            gloo.set_viewport(0, 0, *self.size)
-            program.draw('triangles', self.index_buffer)
-
-            # Retrieve the contents of the FBO texture
-            self.rgb = gloo.read_pixels((0, 0, self.size[0], self.size[1]))[:, :, :3]
-            self.rgb = np.copy(self.rgb)
-
-    def draw_depth(self):
-        program = gloo.Program(_depth_vertex_code, _depth_fragment_code)
-        program.bind(self.vertex_buffer)
-        program['u_mv'] = _compute_model_view(self.mat_model, self.mat_view)
-        program['u_mvp'] = _compute_model_view_proj(self.mat_model, self.mat_view, self.mat_proj)
-
-        # Texture where we render the scene
-        render_tex = gloo.Texture2D(shape=self.shape + (4,), format=gl.GL_RGBA,
-                                    internalformat=gl.GL_RGBA32F)
-
-        # Frame buffer object
-        fbo = gloo.FrameBuffer(render_tex, gloo.RenderBuffer(self.shape, format='depth'))
-        with fbo:
-            gloo.set_state(depth_test=True)
-            gloo.set_state(cull_face=True)
-            gloo.set_cull_face('back')  # Back-facing polygons will be culled
-            gloo.set_clear_color((0.0, 0.0, 0.0, 0.0))
-            gloo.clear(color=True, depth=True)
-            gloo.set_viewport(0, 0, *self.size)
-            program.draw('triangles', self.index_buffer)
-
-            # Retrieve the contents of the FBO texture
-            self.depth = self.read_fbo_color_rgba32f(fbo)
-            self.depth = self.depth[:, :, 0] # Depth is saved in the first channel
-
-    @staticmethod
-    def read_fbo_color_rgba32f(fbo):
-        """
-        Read the color attachment from a FBO, assuming it is GL_RGBA_32F.
-        # Ref: https://github.com/julienr/vertex_visibility/blob/master/depth.py
-        """
-        h, w = fbo.color_buffer.shape[:2]
-        x, y = 0, 0
-        im = gl.glReadPixels(x, y, w, h, gl.GL_RGBA, gl.GL_FLOAT)
-        im = np.frombuffer(im, np.float32)
-        im.shape = h, w, 4
-        im = im[::-1, :]
-
-        return im
-
-
-# Ref: https://github.com/vispy/vispy/blob/master/examples/demo/gloo/offscreen.py
-def render_model(model, im_size, K, R, t, clip_near=100, clip_far=2000,
-                 surf_color=None, bg_color=(0.0, 0.0, 0.0, 0.0),
-                 ambient_weight=0.1, mode='rgb+depth'):
+def render(model, im_size, K, R, t, clip_near=100, clip_far=2000,
+           surf_color=None, bg_color=(0.0, 0.0, 0.0, 0.0),
+           ambient_weight=0.1, mode='rgb+depth'):
 
     # Process input data
     #---------------------------------------------------------------------------
@@ -296,7 +247,7 @@ def render_model(model, im_size, K, R, t, clip_near=100, clip_far=2000,
             if colors.max() > 1.0:
                 colors /= 255.0 # Color values are expected to be in range [0, 1]
         else:
-            colors = np.ones((model['pts'].shape[0], 4), np.float32) * 0.5
+            colors = np.ones((model['pts'].shape[0], 3), np.float32) * 0.5
     else:
         colors = np.tile(list(surf_color) + [1.0], [model['pts'].shape[0], 1])
     vertices_type = [('a_position', np.float32, 3),
@@ -308,18 +259,58 @@ def render_model(model, im_size, K, R, t, clip_near=100, clip_far=2000,
     #---------------------------------------------------------------------------
     render_rgb = mode in ['rgb', 'rgb+depth']
     render_depth = mode in ['depth', 'rgb+depth']
-    c = _Canvas(vertices, model['faces'], im_size, K, R, t, clip_near, clip_far,
-                bg_color, ambient_weight, render_rgb, render_depth)
-    app.run()
-    c.close()
 
+    # Model matrix
+    mat_model = np.eye(4, dtype=np.float32) # From object space to world space
+
+    # View matrix (transforming also the coordinate system from OpenCV to
+    # OpenGL camera space)
+    mat_view = np.eye(4, dtype=np.float32) # From world space to eye space
+    mat_view[:3, :3], mat_view[:3, 3] = R, t.squeeze()
+    yz_flip = np.eye(4, dtype=np.float32)
+    yz_flip[1, 1], yz_flip[2, 2] = -1, -1
+    mat_view = yz_flip.dot(mat_view) # OpenCV to OpenGL camera system
+    mat_view = mat_view.T # OpenGL expects column-wise matrix format
+
+    # Projection matrix
+    mat_proj = _compute_calib_proj(K, 0, 0, im_size[0], im_size[1], clip_near, clip_far)
+
+    # Create buffers
+    vertex_buffer = vertices.view(gloo.VertexBuffer)
+    index_buffer = model['faces'].flatten().astype(np.uint32).view(gloo.IndexBuffer)
+
+    window = app.Window(visible=False)
+
+    global rgb, depth
+    rgb = None
+    depth = None
+
+    @window.event
+    def on_draw(dt):
+        window.clear()
+        shape = (im_size[1], im_size[0])
+        if render_rgb:
+            # Render color image
+            global rgb
+            rgb = draw_color(shape, vertex_buffer, index_buffer, mat_model,
+                             mat_view, mat_proj, ambient_weight, bg_color)
+        if render_depth:
+            # Render depth image
+            global depth
+            depth = draw_depth(shape, vertex_buffer, index_buffer, mat_model,
+                               mat_view, mat_proj)
+
+    app.run(framecount=0) # The on_draw function is called framecount+1 times
+    window.close()
+
+    # Set output
     #---------------------------------------------------------------------------
     if mode == 'rgb':
-        return c.rgb
+        return rgb
     elif mode == 'depth':
-        return c.depth
+        return depth
     elif mode == 'rgb+depth':
-        return c.rgb, c.depth
+        return rgb, depth
     else:
         print 'Error: Unknown rendering mode.'
         exit(-1)

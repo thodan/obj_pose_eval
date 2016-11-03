@@ -5,7 +5,7 @@
 
 # A script for estimation of visibility masks in images from the ICCV2015 Occluded
 # Object Challenge [1]. Besides the dataset [2], please download also the object
-# models in PLY format from [3] and put them into subfolder "model_ply" of
+# models in PLY format from [3] and put them into subfolder "models_ply" of
 # the main dataset folder "OcclusionChallengeICCV2015". You will also need to
 # set data_basepath below.
 #
@@ -13,14 +13,14 @@
 # [2] https://cloudstore.zih.tu-dresden.de/public.php?service=files&t=a65ec05fedd4890ae8ced82dfcf92ad8
 # [3] http://cmp.felk.cvut.cz/~hodanto2/store/OcclusionChallengeICCV2015_models_ply.zip
 
-import os
 import glob
-import numpy as np
-import matplotlib.pyplot as plt
+import os
+
 import cv2
-import inout
-from pose_error import vsd
-from pose_error.utils import misc, renderer
+import matplotlib.pyplot as plt
+import numpy as np
+
+from obj_pose_eval import inout, misc, renderer, visibility
 
 # Path to the OcclusionChallengeICCV2015 folder:
 #-------------------------------------------------------------------------------
@@ -46,16 +46,19 @@ gt_poses = []
 for obj in objs:
     print 'Loading data:', obj
     model_fpath = model_fpath_mask.format(obj)
-    models.append(inout.read_ply(model_fpath))
+    models.append(inout.load_ply(model_fpath))
 
     gt_fpaths = sorted(glob.glob(gt_poses_mask.format(obj)))
     gt_poses_obj = []
     for gt_fpath in gt_fpaths:
-        gt_poses_obj.append(inout.read_gt_pose_OcclusionChallengeICCV2015(gt_fpath))
+        gt_poses_obj.append(
+            inout.load_gt_pose_dresden(gt_fpath))
     gt_poses.append(gt_poses_obj)
 
 # Prepare figure for visualization
 fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(16, 10))
+plt.show(block=False)
+
 cb_dist_diff = None
 cb_dist = None
 
@@ -80,7 +83,7 @@ for im_id in im_ids:
         if pose['R'].size != 0 and pose['t'].size != 0:
 
             # Render the object model
-            depth_ren_gt = renderer.render_model(
+            depth_ren_gt = renderer.render(
                 models[obj_id], im_size, K, pose['R'], pose['t'], 0.1, 2.0,
                 surf_color=(0.0, 1.0, 0.0), mode='depth')
             depth_ren_gt *= 1000 # Convert the rendered depth map to [mm]
@@ -90,9 +93,9 @@ for im_id in im_ids:
 
             # Estimate the visibility mask
             delta = 15 # [mm]
-            visib_mask = vsd.estimate_visibility_mask(dist, dist_ren_gt, delta)
+            visib_mask = visibility.estimate_visib_mask(dist, dist_ren_gt, delta)
 
-            # Get the non-visibility mask
+            # Get the non-visibility (occlusion) mask
             nonvisib_mask = np.logical_and(~visib_mask, dist_ren_gt > 0)
 
             # Difference between the test and the rendered distance image

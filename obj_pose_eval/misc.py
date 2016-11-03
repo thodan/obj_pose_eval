@@ -1,8 +1,19 @@
 # Author: Tomas Hodan (hodantom@cmp.felk.cvut.cz)
 # Center for Machine Perception, Czech Technical University in Prague
 
+import math
+import os
 import numpy as np
+from scipy.spatial import distance
 
+def ensure_dir(path):
+    """
+    Ensures that the specified directory exists.
+
+    :param path: Path to the directory.
+    """
+    if not os.path.exists(path):
+        os.makedirs(path)
 
 def depth_im_to_dist_im(depth_im, K):
     """
@@ -25,7 +36,6 @@ def depth_im_to_dist_im(depth_im, K):
     dist_im = np.linalg.norm(np.dstack((Xs, Ys, depth_im)), axis=2)
     return dist_im
 
-
 def transform_pts_Rt(pts, R, t):
     """
     Applies a rigid transformation to 3D points.
@@ -38,3 +48,34 @@ def transform_pts_Rt(pts, R, t):
     assert(pts.shape[1] == 3)
     pts_t = R.dot(pts.T) + t.reshape((3, 1))
     return pts_t.T
+
+def calc_pts_diameter(pts):
+    """
+    Calculates diameter of a set of points (i.e. the maximum distance between
+    any two points in the set).
+
+    :param pts: nx3 ndarray with 3D points.
+    :return: Diameter.
+    """
+    diameter = -1
+    for pt_id in range(pts.shape[0]):
+        if pt_id % 1000 == 0: print(pt_id)
+        pt_dup = np.tile(np.array([pts[pt_id, :]]), [pts.shape[0] - pt_id, 1])
+        pts_diff = pt_dup - pts[pt_id:, :]
+        max_dist = math.sqrt((pts_diff * pts_diff).sum(axis=1).max())
+        if max_dist > diameter:
+            diameter = max_dist
+    return diameter
+
+def calc_pts_diameter2(pts):
+    """
+    Calculates diameter of a set of points (i.e. the maximum distance between
+    any two points in the set). Faster but requires more memory than
+    calc_pts_diameter.
+
+    :param pts: nx3 ndarray with 3D points.
+    :return: Diameter.
+    """
+    dists = distance.cdist(pts, pts, 'euclidean')
+    diameter = np.max(dists)
+    return diameter
