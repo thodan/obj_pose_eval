@@ -1,8 +1,5 @@
-#!/usr/bin/env python
-
 # Author: Tomas Hodan (hodantom@cmp.felk.cvut.cz)
 # Center for Machine Perception, Czech Technical University in Prague
-
 
 def match_poses(ests, gts, ests_errs, error_thresh, prune_ests=True):
 

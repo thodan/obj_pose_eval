@@ -1,7 +1,7 @@
 # Author: Tomas Hodan (hodantom@cmp.felk.cvut.cz)
 # Center for Machine Perception, Czech Technical University in Prague
 
-# A script to render rgb/depth image of a 3D mesh model.
+# Renders rgb/depth image of a 3D mesh model.
 
 import numpy as np
 from glumpy import app, gloo, gl
