@@ -10,14 +10,14 @@ European Conference on Computer Vision Workshops (ECCVW) 2016, Amsterdam
 http://cmp.felk.cvut.cz/~hodanto2/data/hodan2016evaluation.pdf
 ```
 
-**Installation:**
+**Installation**
 ```
 pip install git+https://github.com/thodan/obj_pose_eval.git
 ```
 
 This command will install also the required libraries, with exception of OpenCV. For instructions on how to install OpenCV with the Python interface, see: https://breakthrough.github.io/Installing-OpenCV
 
-**Samples:**
+**Samples**
 
 - samples/**eval_rotating_cup.py**: Evaluates the pose error functions.
 - samples/**render_demo.py**: Renders color/depth image of a 3D mesh model.
