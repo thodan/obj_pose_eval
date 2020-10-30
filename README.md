@@ -1,3 +1,5 @@
+## This repository is no longer maintained. Please use the [BOP Toolkit](https://github.com/thodan/bop_toolkit) instead.
+
 ### Tools for Evaluation of 6D Object Pose Estimation
 
 The tools are implemented in Python 2.7 and require libraries SciPy (0.18.1), NumPy (1.11.2) and Glumpy (1.0.6). Samples additionally require Matplotlib (1.5.3) and OpenCV (3.1). Tested library versions are in the brackets.
